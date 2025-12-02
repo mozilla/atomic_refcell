@@ -87,6 +87,77 @@ fn try_interleaved() {
     }
 }
 
+#[derive(Default, Clone, Copy, Debug)]
+struct Baz {
+    a: u32,
+    b: u32,
+}
+
+#[test]
+fn map_split() {
+    let a = AtomicRefCell::new(Baz::default());
+    {
+        let _ = a.try_borrow_mut().unwrap();
+    }
+    let read = a.try_borrow().unwrap();
+    let (first, second) = AtomicRef::map_split(read, |baz| (&baz.a, &baz.b));
+
+    // No writers allowed until both readers go away
+    let _ = a.try_borrow_mut().unwrap_err();
+    drop(first);
+    let _ = a.try_borrow_mut().unwrap_err();
+    drop(second);
+
+    let _write = a.try_borrow_mut().unwrap();
+}
+
+#[test]
+#[should_panic(expected = "already immutably borrowed")]
+fn map_split_panic() {
+    let a = AtomicRefCell::new(Baz::default());
+    let read = a.try_borrow().unwrap();
+    let (first, second) = AtomicRef::map_split(read, |baz| (&baz.a, &baz.b));
+    drop(first);
+    // This should panic even if one of the two immutable references was dropped
+    let _ = a.borrow_mut();
+}
+
+#[test]
+fn map_split_mut() {
+    let a = AtomicRefCell::new(Baz::default());
+    {
+        let _ = a.try_borrow().unwrap();
+    }
+    let write = a.try_borrow_mut().unwrap();
+    let (first, second) = AtomicRefMut::map_split(write, |baz| (&mut baz.a, &mut baz.b));
+
+    // No readers or writers allowed until both writers go away
+    let _ = a.try_borrow().unwrap_err();
+    let _ = a.try_borrow_mut().unwrap_err();
+    drop(first);
+    let _ = a.try_borrow().unwrap_err();
+    let _ = a.try_borrow_mut().unwrap_err();
+    drop(second);
+
+    {
+        let _ = a.try_borrow().unwrap();
+    }
+    {
+        let _ = a.try_borrow_mut().unwrap();
+    }
+}
+
+#[test]
+#[should_panic(expected = "already mutably borrowed")]
+fn map_split_mut_panic() {
+    let a = AtomicRefCell::new(Baz::default());
+    let write = a.try_borrow_mut().unwrap();
+    let (first, second) = AtomicRefMut::map_split(write, |baz| (&mut baz.a, &mut baz.b));
+    drop(first);
+    // This should panic even if one of the two mutable references was dropped
+    let _ = a.borrow_mut();
+}
+
 // For Miri to catch issues when calling a function.
 //
 // See how this scenerio affects std::cell::RefCell implementation:

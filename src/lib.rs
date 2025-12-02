@@ -335,6 +335,46 @@ impl<'b> AtomicBorrowRefMut<'b> {
             Err("already mutably borrowed")
         }
     }
+
+    /// Attempts to create a new `AtomicBorrowRefMut` by incrementing the
+    /// mutable borrow count by 1.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the mutable borrow count would overflow.
+    fn try_clone(&self) -> Result<AtomicBorrowRefMut<'b>, &'static str> {
+        // Increase the mutable borrow count. To avoid overflowing, do a CAS
+        // loop and a checked_add().
+        //
+        // This is the only good way to do this - we cannot blindly fetch_add()
+        // and check later. Overflowing the atomic means that the writer count
+        // wraps to zero, allowing immutable borrows to happen. Consider the
+        // following scenario:
+        //
+        //     let cell = AtomicRefCell::new(Foo::new());
+        //     let a = cell.borrow_mut();
+        //     let (b, c) = AtomicRefMut::map_split(a, ..);
+        //     send_to_thread(b)
+        //       ..
+        //     let (d, e) = AtomicRefMut::map_split(c, ..);
+        //
+        // If the overflow happens during the last map_split(), there will be a
+        // window where `b` (a mutable borrow into a field of `Foo`) is alive in
+        // some other thread, while other threads are able to acquire immutable
+        // borrows into `cell`, causing UB.
+        //
+        // On the upside, this can never panic.
+        match self.borrow.fetch_update(
+            atomic::Ordering::Acquire,
+            atomic::Ordering::Relaxed,
+            |old| old.checked_add(1 << REFCOUNT_BITS),
+        ) {
+            Ok(_) => Ok(Self {
+                borrow: self.borrow,
+            }),
+            Err(_) => Err("mutable borrow count would overflow"),
+        }
+    }
 }
 
 unsafe impl<T: ?Sized + Send> Send for AtomicRefCell<T> {}
@@ -452,6 +492,52 @@ impl<'b, T: ?Sized> AtomicRef<'b, T> {
             borrow: orig.borrow,
         })
     }
+
+    /// Splits an `AtomicRef` into two `AtomicRef`s for different components of
+    /// the borrowed data.
+    ///
+    /// The underlying `AtomicRefCell` will remain borrowed until both returned
+    /// `AtomicRef`s go out of scope.
+    /// # Errors
+    ///
+    /// This function may fail if the operation would overflow the immutable
+    /// reference count. In this case, it will return the original `AtomicRef`.
+    #[inline]
+    pub fn try_map_split<U, V, F>(
+        orig: AtomicRef<'b, T>,
+        f: F,
+    ) -> Result<(AtomicRef<'b, U>, AtomicRef<'b, V>), AtomicRef<'b, T>>
+    where
+        F: FnOnce(&T) -> (&U, &V),
+    {
+        let Ok(borrow) = AtomicBorrowRef::try_new(orig.borrow.borrow) else {
+            return Err(orig);
+        };
+        let (a, b) = f(&*orig);
+        Ok((
+            AtomicRef {
+                value: NonNull::from(a),
+                borrow,
+            },
+            AtomicRef {
+                value: NonNull::from(b),
+                borrow: orig.borrow,
+            },
+        ))
+    }
+
+    /// Like [`try_map_split()`](Self::try_map_split), but instead panics
+    /// immediately on an error.
+    #[inline]
+    pub fn map_split<U, V, F>(orig: AtomicRef<'b, T>, f: F) -> (AtomicRef<'b, U>, AtomicRef<'b, V>)
+    where
+        F: FnOnce(&T) -> (&U, &V),
+    {
+        if let Ok(ret) = Self::try_map_split(orig, f) {
+            return ret;
+        };
+        panic!("immutable borrow count overflow");
+    }
 }
 
 impl<'b, T: ?Sized> AtomicRefMut<'b, T> {
@@ -483,6 +569,58 @@ impl<'b, T: ?Sized> AtomicRefMut<'b, T> {
             borrow: orig.borrow,
             marker: PhantomData,
         })
+    }
+
+    /// Splits an `AtomicRefMut` into two `AtomicRefMut`s for different
+    /// components of the borrowed data.
+    ///
+    /// The underlying `AtomicRefCell` will remain mutably borrowed until both
+    /// returned `AtomicRefMut`s go out of scope.
+    ///
+    /// # Errors
+    ///
+    /// This function may fail if the operation would overflow the mutable
+    /// reference count. In this case, it will return the original `AtomicRefMut`.
+    #[inline]
+    pub fn try_map_split<U, V, F>(
+        mut orig: AtomicRefMut<'b, T>,
+        f: F,
+    ) -> Result<(AtomicRefMut<'b, U>, AtomicRefMut<'b, V>), AtomicRefMut<'b, T>>
+    where
+        F: FnOnce(&mut T) -> (&mut U, &mut V),
+    {
+        let Ok(borrow) = orig.borrow.try_clone() else {
+            return Err(orig);
+        };
+        let (a, b) = f(&mut *orig);
+        Ok((
+            AtomicRefMut {
+                value: NonNull::from(a),
+                borrow,
+                marker: PhantomData,
+            },
+            AtomicRefMut {
+                value: NonNull::from(b),
+                borrow: orig.borrow,
+                marker: PhantomData,
+            },
+        ))
+    }
+
+    /// Like [`try_map_split()`](Self::try_map_split), but instead panics
+    /// immediately on an error.
+    #[inline]
+    pub fn map_split<U, V, F>(
+        orig: AtomicRefMut<'b, T>,
+        f: F,
+    ) -> (AtomicRefMut<'b, U>, AtomicRefMut<'b, V>)
+    where
+        F: FnOnce(&mut T) -> (&mut U, &mut V),
+    {
+        if let Ok(ret) = Self::try_map_split(orig, f) {
+            return ret;
+        };
+        panic!("mutable borrow count overflow");
     }
 }
 
