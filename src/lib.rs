@@ -52,7 +52,12 @@ use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::sync::atomic;
+
+#[cfg(not(feature = "portable-atomic"))]
 use core::sync::atomic::AtomicUsize;
+
+#[cfg(feature = "portable-atomic")]
+use portable_atomic::AtomicUsize;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

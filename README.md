@@ -12,6 +12,7 @@ The crate is `no_std` compatible.
 
 | Feature | Description |
 |---|---|
+| `portable-atomic` | Use [`portable-atomic`](https://crates.io/crates/portable-atomic) instead of `core::sync::atomic`. Enables support for targets without native atomic compare-and-swap instructions (e.g. `thumbv6m-none-eabi`). |
 | `serde` | Implement `Serialize` and `Deserialize` for `AtomicRefCell<T>`. |
 
 ## Minimum Supported Rust Version (MSRV)
