@@ -1,12 +1,12 @@
 #![feature(test)]
 
-extern crate atomic_refcell;
 extern crate test;
 
 use atomic_refcell::AtomicRefCell;
 use test::Bencher;
 
 #[derive(Default)]
+#[allow(dead_code)]
 struct Bar(u32);
 
 #[bench]

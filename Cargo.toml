@@ -3,10 +3,11 @@ name = "atomic_refcell"
 version = "0.1.12"
 authors = ["Bobby Holley <bobbyholley@gmail.com>"]
 description = "Threadsafe RefCell"
-license = "Apache-2.0/MIT"
+license = "Apache-2.0 OR MIT"
 repository = "https://github.com/bholley/atomic_refcell"
 documentation = "https://docs.rs/atomic_refcell/"
-edition = "2018"
+edition = "2021"
+rust-version = "1.60"
 
 [dependencies]
 serde = { version = "1.0", optional = true }

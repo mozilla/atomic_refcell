@@ -55,8 +55,6 @@ use core::sync::atomic;
 use core::sync::atomic::AtomicUsize;
 
 #[cfg(feature = "serde")]
-extern crate serde;
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// A threadsafe analogue to RefCell.
@@ -120,7 +118,7 @@ impl<T> AtomicRefCell<T> {
 impl<T: ?Sized> AtomicRefCell<T> {
     /// Immutably borrows the wrapped value.
     #[inline]
-    pub fn borrow(&self) -> AtomicRef<T> {
+    pub fn borrow(&self) -> AtomicRef<'_, T> {
         match AtomicBorrowRef::try_new(&self.borrow) {
             Ok(borrow) => AtomicRef {
                 value: unsafe { NonNull::new_unchecked(self.value.get()) },
@@ -133,7 +131,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// Attempts to immutably borrow the wrapped value, but instead of panicking
     /// on a failed borrow, returns `Err`.
     #[inline]
-    pub fn try_borrow(&self) -> Result<AtomicRef<T>, BorrowError> {
+    pub fn try_borrow(&self) -> Result<AtomicRef<'_, T>, BorrowError> {
         match AtomicBorrowRef::try_new(&self.borrow) {
             Ok(borrow) => Ok(AtomicRef {
                 value: unsafe { NonNull::new_unchecked(self.value.get()) },
@@ -145,7 +143,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
 
     /// Mutably borrows the wrapped value.
     #[inline]
-    pub fn borrow_mut(&self) -> AtomicRefMut<T> {
+    pub fn borrow_mut(&self) -> AtomicRefMut<'_, T> {
         match AtomicBorrowRefMut::try_new(&self.borrow) {
             Ok(borrow) => AtomicRefMut {
                 value: unsafe { NonNull::new_unchecked(self.value.get()) },
@@ -159,7 +157,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// Attempts to mutably borrow the wrapped value, but instead of panicking
     /// on a failed borrow, returns `Err`.
     #[inline]
-    pub fn try_borrow_mut(&self) -> Result<AtomicRefMut<T>, BorrowMutError> {
+    pub fn try_borrow_mut(&self) -> Result<AtomicRefMut<'_, T>, BorrowMutError> {
         match AtomicBorrowRefMut::try_new(&self.borrow) {
             Ok(borrow) => Ok(AtomicRefMut {
                 value: unsafe { NonNull::new_unchecked(self.value.get()) },
@@ -194,7 +192,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
 // Core synchronization logic. Keep this section small and easy to audit.
 //
 
-const HIGH_BIT: usize = !(::core::usize::MAX >> 1);
+const HIGH_BIT: usize = !(usize::MAX >> 1);
 const MAX_FAILED_BORROWS: usize = HIGH_BIT + (HIGH_BIT >> 1);
 
 struct AtomicBorrowRef<'b> {
@@ -218,7 +216,7 @@ impl<'b> AtomicBorrowRef<'b> {
             Self::check_overflow(borrow, new);
             Err("already mutably borrowed")
         } else {
-            Ok(AtomicBorrowRef { borrow: borrow })
+            Ok(AtomicBorrowRef { borrow })
         }
     }
 
@@ -399,6 +397,7 @@ impl<'b, T: ?Sized> AtomicRef<'b, T> {
     ///
     /// Like its [std-counterpart](core::cell::Ref::clone), this type does not implement `Clone`
     /// to not interfere with cloning the contained type.
+    #[allow(clippy::should_implement_trait)]
     #[inline]
     pub fn clone(orig: &AtomicRef<'b, T>) -> AtomicRef<'b, T> {
         AtomicRef {
@@ -497,21 +496,24 @@ impl<'b, T: ?Sized> DerefMut for AtomicRefMut<'b, T> {
 }
 
 impl<'b, T: ?Sized + Debug + 'b> Debug for AtomicRef<'b, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         <T as Debug>::fmt(self, f)
     }
 }
 
 impl<'b, T: ?Sized + Debug + 'b> Debug for AtomicRefMut<'b, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         <T as Debug>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized + Debug> Debug for AtomicRefCell<T>  {
+impl<T: ?Sized + Debug> Debug for AtomicRefCell<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.try_borrow() {
-            Ok(borrow) => f.debug_struct("AtomicRefCell").field("value", &borrow).finish(),
+            Ok(borrow) => f
+                .debug_struct("AtomicRefCell")
+                .field("value", &borrow)
+                .finish(),
             Err(_) => {
                 // The RefCell is mutably borrowed so we can't look at its value
                 // here. Show a placeholder instead.
@@ -523,7 +525,9 @@ impl<T: ?Sized + Debug> Debug for AtomicRefCell<T>  {
                     }
                 }
 
-                f.debug_struct("AtomicRefCell").field("value", &BorrowedPlaceholder).finish()
+                f.debug_struct("AtomicRefCell")
+                    .field("value", &BorrowedPlaceholder)
+                    .finish()
             }
         }
     }

@@ -1,8 +1,3 @@
-extern crate atomic_refcell;
-
-#[cfg(feature = "serde")]
-extern crate serde;
-
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 
 #[derive(Debug)]
