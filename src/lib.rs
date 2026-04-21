@@ -44,11 +44,15 @@
 #![allow(unsafe_code)]
 #![deny(missing_docs)]
 
+#![cfg_attr(feature = "coerce_unsized", feature(coerce_unsized))]
+
 use core::cell::UnsafeCell;
 use core::cmp;
 use core::fmt;
 use core::fmt::{Debug, Display};
 use core::marker::PhantomData;
+#[cfg(feature = "coerce_unsized")]
+use core::ops::CoerceUnsized;
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::sync::atomic;
@@ -67,6 +71,9 @@ pub struct AtomicRefCell<T: ?Sized> {
     borrow: AtomicUsize,
     value: UnsafeCell<T>,
 }
+
+#[cfg(feature = "coerce_unsized")]
+impl<T: CoerceUnsized<U>, U> CoerceUnsized<AtomicRefCell<U>> for AtomicRefCell<T> {}
 
 /// An error returned by [`AtomicRefCell::try_borrow`](struct.AtomicRefCell.html#method.try_borrow).
 pub struct BorrowError {
